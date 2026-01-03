@@ -180,6 +180,8 @@ class MainWindow(SingleInstanceWindow):
         self.panel = None
         self.setup_ui()
         self._init_http_server()
+        # 在未登录状态也启动 Web 服务，便于网页触发扫码等动作
+        self._start_http_server()
 
     def setup_ui(self, *, is_new: bool = False):
         for worker in self._ll_workers:
@@ -282,6 +284,14 @@ class MainWindow(SingleInstanceWindow):
             self._server_thread = HttpServerWorker(self._host, self._port)
             self._server_thread.signals.startLive.connect(self.panel.start_live)
             self._server_thread.signals.stopLive.connect(self.panel.stop_live)
+            self._server_thread.signals.startLogin.connect(
+                lambda: self._fetch_qr(True))
+            self._server_thread.signals.logout.connect(
+                self.menu_bar.delete_cookies)
+            self._server_thread.signals.setTitle.connect(
+                self.panel.update_title_from_web)
+            self._server_thread.signals.setArea.connect(
+                self.panel.update_area_from_web)
             self._server_thread.signals.exception.connect(
                 self._http_error_handler)
         else:
@@ -305,8 +315,10 @@ class MainWindow(SingleInstanceWindow):
 
     @Slot(Exception)
     def _http_error_handler(self, e: Exception):
-        QMessageBox.critical(self, f"Web服务线程错误",
-                             repr(e))
+        if not app_state.web_action:
+            QMessageBox.critical(self, f"Web服务线程错误",
+                                 repr(e))
+        app_state.web_action = False
         self._stop_http_server()
 
     @Slot(str)
@@ -397,7 +409,9 @@ class MainWindow(SingleInstanceWindow):
         self._current_cookie_idx = _current_cookie_idx
         if not expired:
             del_cache_user(app_state.cookies_dict["DedeUserID"])
-            QMessageBox.information(self, "账号退出", "账号退出成功")
+            if not app_state.web_action:
+                QMessageBox.information(self, "账号退出", "账号退出成功")
+            app_state.web_action = False
             self.setup_ui(is_new=is_new)
         self.logger.info(
             f"Cookie {app_state.cookies_dict['DedeUserID']} deleted.")
@@ -504,7 +518,11 @@ class MainWindow(SingleInstanceWindow):
         self.logger.info("Starting login flow.")
         app_state.scan_status["timeout"] = False
         if retry and self.login_worker is not None:
-            self.status_label.clicked.disconnect(self._refresh_qr)
+            try:
+                self.status_label.clicked.disconnect(self._refresh_qr)
+            except (TypeError, RuntimeError):
+                # already disconnected or not connected
+                pass
             self.login_worker.stop()
             # Reset status
             app_state.scan_status.update({
@@ -603,6 +621,9 @@ class MainWindow(SingleInstanceWindow):
             app_state.room_info.get("area", ""))
         self.panel.enable_child_combo_autosave(True)
         self._start_http_server()
+        app_state.web_action = False
+        # 更新房间信息以供 web 端展示
+        app_state.scan_status["room_updated"] = True
 
     @Slot()
     def _post_scan_setup(self):
@@ -644,13 +665,16 @@ class MainWindow(SingleInstanceWindow):
         self.status_label.setText("已扫码，等待确认登录...")
 
     def popup_face_widget(self, face_url: str):
-        app_state.stream_status["required_face"] = False
         self.panel.start_btn.setEnabled(True)
         self.tray_start_live_action.setEnabled(True)
         self.panel.stop_btn.setEnabled(False)
         self.tray_stop_live_action.setEnabled(False)
         self.panel.parent_combo.setEnabled(True)
         self.panel.child_combo.setEnabled(True)
+        if app_state.web_action:
+            app_state.web_action = False
+            return
+        app_state.stream_status["required_face"] = False
         auth_worker = FaceAuthWorker()
         self.face_window = FaceQRWidget(auth_worker)
         self.face_window.face_qr.setPixmap(self._qpixmap_from_str(face_url))

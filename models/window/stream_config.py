@@ -418,6 +418,31 @@ class StreamConfigPanel(QWidget):
             on_exception=title_updater.on_exception
         )
 
+    @Slot(str)
+    def update_title_from_web(self, title: str):
+        """Update room title triggered from web API."""
+        if not title:
+            return
+        self.title_input.setCurrentText(title)
+        self._save_title()
+
+    @Slot(str, str)
+    def update_area_from_web(self, parent_text: str, child_text: str):
+        """Update area selection from web API."""
+        if not parent_text or not child_text:
+            return
+        if parent_text not in app_state.parent_area:
+            return
+        if parent_text not in app_state.area_options:
+            return
+        if child_text not in app_state.area_options[parent_text]:
+            return
+        _enabled = self.enable_child_combo_autosave(False)
+        self.parent_combo.setCurrentText(parent_text)
+        self.child_combo.setCurrentText(child_text)
+        self.enable_child_combo_autosave(_enabled)
+        self._save_area()
+
     @Slot()
     def _edit_cover(self):
         if app_state.room_info["cover_status"] == 0:

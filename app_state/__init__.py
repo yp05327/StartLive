@@ -120,6 +120,9 @@ obs_connecting = False
 # Store cookies after login
 cookies_dict = {}
 
+# Flag to indicate actions triggered from web server (suppress UI popups)
+web_action = False
+
 
 def create_session(h_type: HeadersType) -> Session:
     session = Session()
